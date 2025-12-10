@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.old
+*~
+
+# Model files (too large for git - kept locally)
+data/huggingface/
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+
+# Output and temp files (kept locally)
+data/output/*.mp4
+data/output/*.avi
+data/output/*.mov
+data/gradio_tmp/
+
+# Backup files
+*.old.md
+README.old.md
+
+# Documentation build
+CogVideo/docs/_build/
+
+# Keep data folder structure but ignore contents
+data/*
+!data/.gitkeep

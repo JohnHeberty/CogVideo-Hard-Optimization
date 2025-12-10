@@ -1,0 +1,52 @@
+services:
+  cogvideo:
+    container_name: cogvideo
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Para docker compose (sem swarm), este é o jeito mais simples de expor a GPU
+    gpus: all
+
+    restart: unless-stopped
+
+    ports:
+      - "7860:7860"
+
+    environment:
+      - TZ=America/Sao_Paulo
+      - HF_HOME=/data/huggingface
+      - TRANSFORMERS_CACHE=/data/huggingface
+      - HF_HUB_CACHE=/data/huggingface
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7860
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      # Modelos (podem ser trocados se quiser)
+      - COGVIDEO_T2V_MODEL=THUDM/CogVideoX-5b
+      - COGVIDEO_I2V_MODEL=THUDM/CogVideoX-5b-I2V
+      # Logging (opcional)
+      - LOG_LEVEL=INFO
+
+    volumes:
+      # Cache do Hugging Face (modelos baixados automaticamente)
+      - ./data/huggingface:/data/huggingface
+
+      # Pasta de saída dos vídeos gerados
+      - ./data/output:/workspace/CogVideo/inference/gradio_composite_demo/output
+      
+      # Pasta temporária do Gradio
+      - ./data/gradio_tmp:/workspace/CogVideo/inference/gradio_composite_demo/gradio_tmp
+
+      # Bibliotecas da GPU do host
+      - /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:ro
+      - /usr/lib/x86_64-linux-gnu/libcuda.so.1:/usr/lib/x86_64-linux-gnu/libcuda.so.1:ro
+
+    # Health check for Gradio web server
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # Allow 2 minutes for model loading
