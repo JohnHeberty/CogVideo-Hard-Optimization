@@ -52,4 +52,5 @@ EXPOSE 7860
 
 # Usa o app.py otimizado (já tem lazy load + component sharing + todas otimizações)
 # ao invés do lite_webui.py
-CMD ["python", "app.py"]
+# -u = unbuffered output para ver logs em tempo real
+CMD ["python", "-u", "app.py"]

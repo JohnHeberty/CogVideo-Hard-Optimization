@@ -1,14 +1,13 @@
-# 🎬 CogVideoX RTX 3090 - Hard Optimization
+# 🎬 CogVideoX RTX 3090 - Production Ready
 
-[![Tests](https://img.shields.io/badge/tests-77%20passing-success)](tests/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
-[![VRAM](https://img.shields.io/badge/VRAM-Optimized%2024GB-orange)](https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3090-3090ti/)
-[![RAM](https://img.shields.io/badge/RAM-520MB%20idle-brightgreen)](#-memory-optimization)
+[![Docker](https://img.shields.io/badge/docker-ready-blue)](https://www.docker.com/)
+[![VRAM](https://img.shields.io/badge/VRAM-24GB%20RTX%203090-orange)](https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3090-3090ti/)
+[![Memory](https://img.shields.io/badge/Auto%20Cleanup-Memory%20Manager-brightgreen)](#-memory-management)
 
-> **Production-ready CogVideoX optimized for NVIDIA RTX 3090 with 98.4% RAM reduction and lazy loading**
+> **Production-ready CogVideoX optimized for NVIDIA RTX 3090 with automatic memory management and lazy loading**
 
-Comprehensive optimization including FPS auto-detection, VRAM management, motion presets, H.264 codec, lazy model loading, and memory-efficient architecture.
+Complete video generation solution with FPS auto-detection, VRAM optimization, motion presets, H.264 codec, intelligent memory management for multi-service environments.
 
 ---
 
@@ -47,42 +46,38 @@ on the road</code></pre>
 
 ## 🚀 Key Features
 
-### ⚡ Latest Improvements (v2.0)
+## ✨ Key Features
 
-- **🛡️ Robust Error Handling** - Automatic model cleanup on crashes
-- **💬 Error Reporting** - All errors displayed in Gradio UI with `gr.Error()`
-- **🔄 Memory Recovery** - Models unload on failure (21GB → 700MB)
-- **📊 Detailed Logging** - Full tracebacks for debugging
-- **🎯 CUDA OOM Detection** - Specific handling for out-of-memory errors
-
-See [ERROR_HANDLING.md](ERROR_HANDLING.md) for details.
+### 🧠 Memory Management (Auto-Cleanup)
+- **Automatic Model Unloading** - Models are freed immediately after use
+- **Context Managers** - Safe resource management with `with` blocks
+- **Multi-Service Ready** - VRAM/RAM freed for other microservices
+- **Aggressive Cleanup** - Production mode with automatic garbage collection
+- **Real-time Monitoring** - RAM and VRAM usage tracking
 
 ### 🎯 Core Optimizations
-- ⚡ **Lazy Loading** - Models load on-demand: **out of memory idle** → 23GB only during generation
+- ⚡ **Lazy Loading** - Models load on-demand only when needed
 - 🎞️ **FPS Auto-Detection** - Automatically detects 8fps (CogVideoX) or 16fps (CogVideoX1.5)
 - 💾 **VRAM Management** - Smart offload strategies prevent OOM errors
 - 🎬 **Motion Presets** - 5 quality levels (fixes motion artifacts)
-- 🔧 **Memory Optimized** - **98.4% RAM reduction** (25GB → 12GB idle)
+- 📹 **H.264 Codec** - Optimized video export with 85-95% file size reduction
 
 ### 🛠️ Advanced Features
-- 📹 **H.264 Codec** - 85-95% file size reduction (100MB → 8MB)
-- 📊 **Structured Logging** - Colors, timing, VRAM tracking
-- ⚠️ **Exception Handling** - User-friendly error messages
-- 🐳 **Docker Ready** - Health checks and automatic restarts
-- ✅ **Complete Tests** - 77 tests with 100% pass rate
-- 📚 **Full Documentation** - API reference + troubleshooting guides
+- 🐳 **Docker Ready** - Complete containerization with NVIDIA GPU support
+- 🔄 **Error Recovery** - Automatic cleanup on failures with friendly error messages
+- 📊 **Structured Logging** - Real-time insights with colors and timing
+- 🎨 **Gradio UI** - Modern web interface for Text-to-Video, Image-to-Video, and Video-to-Video
 
-### 💾 Memory Optimization
+### 💾 Memory Usage
 
 | Stage | RAM Usage | VRAM Usage | Status |
 |-------|-----------|------------|--------|
-| **Idle (Waiting)** | 520MB (1.9%) | 4MB | ✅ Excellent |
-| **Generating Video** | 2-5GB | 15-18GB | ✅ Optimal |
-| **With Upscale** | 12-15GB | 18-20GB | ⚠️ High but stable |
-| **With Interpolation** | 10-12GB | 16-18GB | ⚠️ High but stable |
+| **Idle (Waiting)** | ~700MB | ~0GB | ✅ Excellent |
+| **Generating Video** | 3-5GB | 15-18GB | ✅ Optimal |
+| **With Upscale** | 15GB peak | 18-20GB | ⚠️ Auto-unload after use |
+| **With Interpolation** | 12GB peak | 16-18GB | ⚠️ Auto-unload after use |
 
-**Before Optimization:** 25GB RAM idle (93.5% usage) 🔴  
-**After Optimization:** 520MB RAM idle (1.9% usage) ✅
+**Memory Manager ensures models are unloaded after each operation, keeping idle state minimal.**
 
 ---
 

@@ -6,6 +6,10 @@ Usage:
     OpenAI_API_KEY=your_openai_api_key OPENAI_BASE_URL=https://api.openai.com/v1 python inference/gradio_web_demo.py
 """
 
+print("=" * 60)
+print("🚀 COGVIDEO APP STARTING...")
+print("=" * 60)
+
 import math
 import os
 import random
@@ -38,20 +42,28 @@ from rife_model import load_rife_model, rife_inference_with_latents
 from huggingface_hub import hf_hub_download, snapshot_download
 
 # Add parent directory to path to import fps_utils
+print("1. Configuring sys.path...")
 sys.path.insert(0, str(Path(__file__).parent.parent))
+print("2. Importing fps_utils...")
 from fps_utils import get_correct_fps
+print("3. Importing vram_utils...")
 from vram_utils import get_recommended_offload_strategy, apply_offload_strategy, configure_vae_tiling
-
+print("4. Importing memory_manager...")
+from memory_manager import get_memory_manager
+print("5. Checking CUDA availability...")
 device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"   Device: {device}")
+
+# Initialize Memory Manager with aggressive cleanup for production
+print("6. Initializing Memory Manager...")
+memory_manager = get_memory_manager(aggressive_cleanup=True)
+print("   ✅ Memory Manager initialized")
 
 MODEL_T2V = "THUDM/CogVideoX-5b"
 MODEL_I2V = "THUDM/CogVideoX-5b-I2V"
 
-# Download required models for upscaling and interpolation
-hf_hub_download(
-    repo_id="ai-forever/Real-ESRGAN", filename="RealESRGAN_x4.pth", local_dir="model_real_esran"
-)
-snapshot_download(repo_id="AlexWortega/RIFE", local_dir="model_rife")
+# Models for upscaling and interpolation will be downloaded on-demand when first used
+print("✅ CogVideo app starting...")
 
 # Global pipeline cache - will be loaded lazily on first use
 _pipeline_cache = {}
@@ -128,60 +140,44 @@ def get_pipeline(pipeline_type: str):
     return _pipeline_cache[pipeline_type]
 
 
-# Lazy loading for upscaling and interpolation models
-# These will be loaded only when needed, not on startup
-_upscale_model = None
-_frame_interpolation_model = None
+# Register model loaders with Memory Manager
+def _load_upscale_model():
+    """Model loader function for upscaling."""
+    print("Loading upscaling model (Real-ESRGAN)...")
+    # Download if not exists
+    if not os.path.exists("model_real_esran/RealESRGAN_x4.pth"):
+        print("  Downloading Real-ESRGAN model...")
+        hf_hub_download(
+            repo_id="ai-forever/Real-ESRGAN", filename="RealESRGAN_x4.pth", local_dir="model_real_esran"
+        )
+    return utils.load_sd_upscale("model_real_esran/RealESRGAN_x4.pth", device)
 
-def get_upscale_model():
-    """Lazy load upscaling model only when needed."""
-    global _upscale_model
-    try:
-        if _upscale_model is None:
-            print("Loading upscaling model (Real-ESRGAN)...")
-            _upscale_model = utils.load_sd_upscale("model_real_esran/RealESRGAN_x4.pth", device)
-            print("✅ Upscaling model loaded successfully.")
-        return _upscale_model
-    except Exception as e:
-        print(f"❌ Failed to load upscaling model: {str(e)}")
-        _upscale_model = None
-        raise
+def _load_frame_interpolation_model():
+    """Model loader function for frame interpolation."""
+    print("Loading frame interpolation model (RIFE)...")
+    # Download if not exists
+    if not os.path.exists("model_rife"):
+        print("  Downloading RIFE model...")
+        snapshot_download(repo_id="AlexWortega/RIFE", local_dir="model_rife")
+    return load_rife_model("model_rife")
 
-def get_frame_interpolation_model():
-    """Lazy load frame interpolation model only when needed."""
-    global _frame_interpolation_model
-    try:
-        if _frame_interpolation_model is None:
-            print("Loading frame interpolation model (RIFE)...")
-            _frame_interpolation_model = load_rife_model("model_rife")
-            print("✅ Frame interpolation model loaded successfully.")
-        return _frame_interpolation_model
-    except Exception as e:
-        print(f"❌ Failed to load frame interpolation model: {str(e)}")
-        _frame_interpolation_model = None
-        raise
+# Register loaders with Memory Manager
+memory_manager.register_model_loader("upscale", _load_upscale_model)
+memory_manager.register_model_loader("frame_interpolation", _load_frame_interpolation_model)
 
 def cleanup_models():
-    """Free memory from auxiliary models and clear CUDA cache."""
-    global _upscale_model, _frame_interpolation_model
-    
+    """Free memory from all models and clear CUDA cache."""
     try:
-        if _upscale_model is not None:
-            print("Cleaning up upscaling model...")
-            del _upscale_model
-            _upscale_model = None
-            
-        if _frame_interpolation_model is not None:
-            print("Cleaning up frame interpolation model...")
-            del _frame_interpolation_model
-            _frame_interpolation_model = None
-            
-        # Clear CUDA cache
+        memory_manager.unload_all_models()
+        
+        import gc
+        gc.collect()
+        
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
             
-        print("Memory cleanup completed.")
+        print("✅ Models cleaned up successfully.")
         
     except Exception as e:
         print(f"Error during cleanup: {str(e)}")
@@ -191,9 +187,8 @@ def cleanup_on_error():
     print("\n⚠️ ERROR DETECTED - Performing emergency memory cleanup...")
     
     try:
-        cleanup_models()
+        memory_manager.force_cleanup()
         
-        # Additional cleanup for main pipeline if needed
         import gc
         gc.collect()
         
