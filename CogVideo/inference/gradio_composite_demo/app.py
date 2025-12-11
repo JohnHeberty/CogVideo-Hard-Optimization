@@ -65,79 +65,63 @@ MODEL_I2V = "THUDM/CogVideoX-5b-I2V"
 # Models for upscaling and interpolation will be downloaded on-demand when first used
 print("✅ CogVideo app starting...")
 
-# Global pipeline cache - will be loaded lazily on first use
-_pipeline_cache = {}
 
-
-def get_pipeline(pipeline_type: str):
-    """
-    Lazy load pipelines on demand to avoid loading all 3 simultaneously.
-    
-    Args:
-        pipeline_type: One of "t2v", "i2v", "v2v"
-        
-    Returns:
-        Configured pipeline ready for inference
-    """
-    global _pipeline_cache
-    
-    if pipeline_type in _pipeline_cache:
-        return _pipeline_cache[pipeline_type]
-    
-    print(f"Loading {pipeline_type} pipeline...")
-    
-    # Determine model path for offload strategy
-    model_path = MODEL_I2V if pipeline_type == "i2v" else MODEL_T2V
+# Pipeline loader functions for Memory Manager
+def _load_t2v_pipeline():
+    """Load Text-to-Video pipeline."""
+    print("📥 Loading T2V pipeline...")
+    model_path = MODEL_T2V
     offload_strategy = get_recommended_offload_strategy(model_path)
     
-    if pipeline_type == "t2v":
-        pipe = CogVideoXPipeline.from_pretrained(MODEL_T2V, torch_dtype=torch.bfloat16)
-        apply_offload_strategy(pipe, offload_strategy)
-        pipe.scheduler = CogVideoXDPMScheduler.from_config(
-            pipe.scheduler.config, timestep_spacing="trailing"
-        )
-        configure_vae_tiling(pipe.vae)
-        _pipeline_cache[pipeline_type] = pipe
-        
-    elif pipeline_type == "v2v":
-        # V2V can share components with T2V if already loaded
-        if "t2v" in _pipeline_cache:
-            base_pipe = _pipeline_cache["t2v"]
-            pipe = CogVideoXVideoToVideoPipeline.from_pretrained(
-                MODEL_T2V,
-                transformer=base_pipe.transformer,
-                vae=base_pipe.vae,
-                scheduler=base_pipe.scheduler,
-                tokenizer=base_pipe.tokenizer,
-                text_encoder=base_pipe.text_encoder,
-                torch_dtype=torch.bfloat16,
-            )
-            apply_offload_strategy(pipe, offload_strategy)
-        else:
-            pipe = CogVideoXVideoToVideoPipeline.from_pretrained(
-                MODEL_T2V, torch_dtype=torch.bfloat16
-            )
-            apply_offload_strategy(pipe, offload_strategy)
-            pipe.scheduler = CogVideoXDPMScheduler.from_config(
-                pipe.scheduler.config, timestep_spacing="trailing"
-            )
-            configure_vae_tiling(pipe.vae)
-        _pipeline_cache[pipeline_type] = pipe
-        
-    elif pipeline_type == "i2v":
-        # I2V uses separate model (5B-I2V), cannot share transformer with T2V
-        pipe = CogVideoXImageToVideoPipeline.from_pretrained(
-            MODEL_I2V, torch_dtype=torch.bfloat16
-        )
-        apply_offload_strategy(pipe, offload_strategy)
-        pipe.scheduler = CogVideoXDPMScheduler.from_config(
-            pipe.scheduler.config, timestep_spacing="trailing"
-        )
-        configure_vae_tiling(pipe.vae)
-        _pipeline_cache[pipeline_type] = pipe
+    pipe = CogVideoXPipeline.from_pretrained(MODEL_T2V, torch_dtype=torch.bfloat16)
+    apply_offload_strategy(pipe, offload_strategy)
+    pipe.scheduler = CogVideoXDPMScheduler.from_config(
+        pipe.scheduler.config, timestep_spacing="trailing"
+    )
+    configure_vae_tiling(pipe.vae)
+    print(f"✅ T2V pipeline loaded with {offload_strategy} offload")
+    return pipe
+
+def _load_i2v_pipeline():
+    """Load Image-to-Video pipeline."""
+    print("📥 Loading I2V pipeline...")
+    model_path = MODEL_I2V
+    offload_strategy = get_recommended_offload_strategy(model_path)
     
-    print(f"{pipeline_type} pipeline loaded successfully with {offload_strategy} offload.")
-    return _pipeline_cache[pipeline_type]
+    pipe = CogVideoXImageToVideoPipeline.from_pretrained(
+        MODEL_I2V, torch_dtype=torch.bfloat16
+    )
+    apply_offload_strategy(pipe, offload_strategy)
+    pipe.scheduler = CogVideoXDPMScheduler.from_config(
+        pipe.scheduler.config, timestep_spacing="trailing"
+    )
+    configure_vae_tiling(pipe.vae)
+    print(f"✅ I2V pipeline loaded with {offload_strategy} offload")
+    return pipe
+
+def _load_v2v_pipeline():
+    """Load Video-to-Video pipeline."""
+    print("📥 Loading V2V pipeline...")
+    model_path = MODEL_T2V
+    offload_strategy = get_recommended_offload_strategy(model_path)
+    
+    pipe = CogVideoXVideoToVideoPipeline.from_pretrained(
+        MODEL_T2V, torch_dtype=torch.bfloat16
+    )
+    apply_offload_strategy(pipe, offload_strategy)
+    pipe.scheduler = CogVideoXDPMScheduler.from_config(
+        pipe.scheduler.config, timestep_spacing="trailing"
+    )
+    configure_vae_tiling(pipe.vae)
+    print(f"✅ V2V pipeline loaded with {offload_strategy} offload")
+    return pipe
+
+# Register ALL pipelines with Memory Manager
+print("🔧 Registering pipelines with Memory Manager...")
+memory_manager.register_model_loader("pipeline_t2v", _load_t2v_pipeline)
+memory_manager.register_model_loader("pipeline_i2v", _load_i2v_pipeline)
+memory_manager.register_model_loader("pipeline_v2v", _load_v2v_pipeline)
+print("✅ Pipelines registered")
 
 
 # Register model loaders with Memory Manager
@@ -364,52 +348,58 @@ def infer(
             seed = random.randint(0, 2**8 - 1)
 
         if video_input is not None:
-            print(f"Running V2V inference with seed {seed}")
-            pipe_v2v = get_pipeline("v2v")
-            video = load_video(video_input)[:49]  # Limit to 49 frames
-            video_pt = pipe_v2v(
-                video=video,
-                prompt=prompt,
-                num_inference_steps=num_inference_steps,
-                num_videos_per_prompt=1,
-                strength=video_strenght,
-                use_dynamic_cfg=True,
-                output_type="pt",
-                guidance_scale=guidance_scale,
-                generator=torch.Generator(device="cpu").manual_seed(seed),
-            ).frames
+            print(f"🎬 Running V2V inference with seed {seed}")
+            with memory_manager.load_model("pipeline_v2v") as pipe_v2v:
+                video = load_video(video_input)[:49]  # Limit to 49 frames
+                video_pt = pipe_v2v(
+                    video=video,
+                    prompt=prompt,
+                    num_inference_steps=num_inference_steps,
+                    num_videos_per_prompt=1,
+                    strength=video_strenght,
+                    use_dynamic_cfg=True,
+                    output_type="pt",
+                    guidance_scale=guidance_scale,
+                    generator=torch.Generator(device="cpu").manual_seed(seed),
+                ).frames
+            # Pipeline automaticamente descarregado aqui
+            print("✅ V2V pipeline unloaded")
             return (video_pt, seed, MODEL_T2V)
             
         elif image_input is not None:
-            print(f"Running I2V inference with seed {seed}")
-            pipe_i2v = get_pipeline("i2v")
-            image_input = Image.fromarray(image_input).resize(size=(720, 480))  # Convert to PIL
-            image = load_image(image_input)
-            video_pt = pipe_i2v(
-                image=image,
-                prompt=prompt,
-                num_inference_steps=num_inference_steps,
-                num_videos_per_prompt=1,
-                use_dynamic_cfg=True,
-                output_type="pt",
-                guidance_scale=guidance_scale,
-                generator=torch.Generator(device="cpu").manual_seed(seed),
-            ).frames
+            print(f"🎬 Running I2V inference with seed {seed}")
+            with memory_manager.load_model("pipeline_i2v") as pipe_i2v:
+                image_input = Image.fromarray(image_input).resize(size=(720, 480))  # Convert to PIL
+                image = load_image(image_input)
+                video_pt = pipe_i2v(
+                    image=image,
+                    prompt=prompt,
+                    num_inference_steps=num_inference_steps,
+                    num_videos_per_prompt=1,
+                    use_dynamic_cfg=True,
+                    output_type="pt",
+                    guidance_scale=guidance_scale,
+                    generator=torch.Generator(device="cpu").manual_seed(seed),
+                ).frames
+            # Pipeline automaticamente descarregado aqui
+            print("✅ I2V pipeline unloaded")
             return (video_pt, seed, MODEL_I2V)
             
         else:
-            print(f"Running T2V inference with seed {seed}")
-            pipe_t2v = get_pipeline("t2v")
-            video_pt = pipe_t2v(
-                prompt=prompt,
-                num_videos_per_prompt=1,
-                num_inference_steps=num_inference_steps,
-                num_frames=49,
-                use_dynamic_cfg=True,
-                output_type="pt",
-                guidance_scale=guidance_scale,
-                generator=torch.Generator(device="cpu").manual_seed(seed),
-            ).frames
+            print(f"🎬 Running T2V inference with seed {seed}")
+            with memory_manager.load_model("pipeline_t2v") as pipe_t2v:
+                video_pt = pipe_t2v(
+                    prompt=prompt,
+                    num_videos_per_prompt=1,
+                    num_inference_steps=num_inference_steps,
+                    num_frames=49,
+                    use_dynamic_cfg=True,
+                    output_type="pt",
+                    guidance_scale=guidance_scale,
+                    generator=torch.Generator(device="cpu").manual_seed(seed),
+                ).frames
+            # Pipeline automaticamente descarregado aqui
+            print("✅ T2V pipeline unloaded")
             return (video_pt, seed, MODEL_T2V)
             
     except torch.cuda.OutOfMemoryError as e:
@@ -433,6 +423,7 @@ def convert_to_gif(video_path):
 
 
 def delete_old_files():
+    """Delete old files and perform memory cleanup periodically."""
     while True:
         now = datetime.now()
         cutoff = now - timedelta(minutes=10)
@@ -445,10 +436,16 @@ def delete_old_files():
                     file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
                     if file_mtime < cutoff:
                         os.remove(file_path)
-        time.sleep(600)
+        
+        # Cleanup de memória a cada 10 minutos
+        print("🧹 Periodic memory cleanup...")
+        memory_manager.auto_cleanup_if_needed(threshold_percent=70.0)
+        
+        time.sleep(600)  # 10 minutos
 
 
 threading.Thread(target=delete_old_files, daemon=True).start()
+print("✅ Background cleanup thread started")
 examples_videos = [
     ["example_videos/horse.mp4"],
     ["example_videos/kitten.mp4"],
@@ -697,9 +694,26 @@ with gr.Blocks() as demo:
                 raise gr.Error(f"{error_msg}\n\nModels have been unloaded. Check container logs for details.")
                 
             finally:
-                # Always clear CUDA cache after generation
+                # LIMPEZA FORÇADA de memória após cada geração
+                print("🧹 Forcing complete memory cleanup after generation...")
+                memory_manager.force_cleanup()
+                
+                # Limpa CUDA cache múltiplas vezes
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    for _ in range(3):
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        try:
+                            torch.cuda.ipc_collect()
+                        except:
+                            pass
+                
+                # Garbage collection agressivo
+                import gc
+                gc.collect()
+                gc.collect()
+                
+                print("✅ Memory cleanup complete")
 
     def enhance_prompt_func(prompt):
         return convert_prompt(prompt, retry_times=1)
