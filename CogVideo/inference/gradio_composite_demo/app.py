@@ -136,20 +136,75 @@ _frame_interpolation_model = None
 def get_upscale_model():
     """Lazy load upscaling model only when needed."""
     global _upscale_model
-    if _upscale_model is None:
-        print("Loading upscaling model (Real-ESRGAN)...")
-        _upscale_model = utils.load_sd_upscale("model_real_esran/RealESRGAN_x4.pth", device)
-        print("Upscaling model loaded.")
-    return _upscale_model
+    try:
+        if _upscale_model is None:
+            print("Loading upscaling model (Real-ESRGAN)...")
+            _upscale_model = utils.load_sd_upscale("model_real_esran/RealESRGAN_x4.pth", device)
+            print("✅ Upscaling model loaded successfully.")
+        return _upscale_model
+    except Exception as e:
+        print(f"❌ Failed to load upscaling model: {str(e)}")
+        _upscale_model = None
+        raise
 
 def get_frame_interpolation_model():
     """Lazy load frame interpolation model only when needed."""
     global _frame_interpolation_model
-    if _frame_interpolation_model is None:
-        print("Loading frame interpolation model (RIFE)...")
-        _frame_interpolation_model = load_rife_model("model_rife")
-        print("Frame interpolation model loaded.")
-    return _frame_interpolation_model
+    try:
+        if _frame_interpolation_model is None:
+            print("Loading frame interpolation model (RIFE)...")
+            _frame_interpolation_model = load_rife_model("model_rife")
+            print("✅ Frame interpolation model loaded successfully.")
+        return _frame_interpolation_model
+    except Exception as e:
+        print(f"❌ Failed to load frame interpolation model: {str(e)}")
+        _frame_interpolation_model = None
+        raise
+
+def cleanup_models():
+    """Free memory from auxiliary models and clear CUDA cache."""
+    global _upscale_model, _frame_interpolation_model
+    
+    try:
+        if _upscale_model is not None:
+            print("Cleaning up upscaling model...")
+            del _upscale_model
+            _upscale_model = None
+            
+        if _frame_interpolation_model is not None:
+            print("Cleaning up frame interpolation model...")
+            del _frame_interpolation_model
+            _frame_interpolation_model = None
+            
+        # Clear CUDA cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            
+        print("Memory cleanup completed.")
+        
+    except Exception as e:
+        print(f"Error during cleanup: {str(e)}")
+
+def cleanup_on_error():
+    """Emergency cleanup function to be called on errors."""
+    print("\n⚠️ ERROR DETECTED - Performing emergency memory cleanup...")
+    
+    try:
+        cleanup_models()
+        
+        # Additional cleanup for main pipeline if needed
+        import gc
+        gc.collect()
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+            
+        print("✅ Emergency cleanup completed.\n")
+        
+    except Exception as e:
+        print(f"❌ Error during emergency cleanup: {str(e)}")
 
 # Create output directories
 os.makedirs("./output", exist_ok=True)
@@ -309,52 +364,68 @@ def infer(
     Returns:
         tuple: (video_pt, seed, model_path) where model_path is the model used for FPS detection
     """
-    if seed == -1:
-        seed = random.randint(0, 2**8 - 1)
+    try:
+        if seed == -1:
+            seed = random.randint(0, 2**8 - 1)
 
-    if video_input is not None:
-        pipe_v2v = get_pipeline("v2v")
-        video = load_video(video_input)[:49]  # Limit to 49 frames
-        video_pt = pipe_v2v(
-            video=video,
-            prompt=prompt,
-            num_inference_steps=num_inference_steps,
-            num_videos_per_prompt=1,
-            strength=video_strenght,
-            use_dynamic_cfg=True,
-            output_type="pt",
-            guidance_scale=guidance_scale,
-            generator=torch.Generator(device="cpu").manual_seed(seed),
-        ).frames
-        return (video_pt, seed, MODEL_T2V)
-    elif image_input is not None:
-        pipe_i2v = get_pipeline("i2v")
-        image_input = Image.fromarray(image_input).resize(size=(720, 480))  # Convert to PIL
-        image = load_image(image_input)
-        video_pt = pipe_i2v(
-            image=image,
-            prompt=prompt,
-            num_inference_steps=num_inference_steps,
-            num_videos_per_prompt=1,
-            use_dynamic_cfg=True,
-            output_type="pt",
-            guidance_scale=guidance_scale,
-            generator=torch.Generator(device="cpu").manual_seed(seed),
-        ).frames
-        return (video_pt, seed, MODEL_I2V)
-    else:
-        pipe_t2v = get_pipeline("t2v")
-        video_pt = pipe_t2v(
-            prompt=prompt,
-            num_videos_per_prompt=1,
-            num_inference_steps=num_inference_steps,
-            num_frames=49,
-            use_dynamic_cfg=True,
-            output_type="pt",
-            guidance_scale=guidance_scale,
-            generator=torch.Generator(device="cpu").manual_seed(seed),
-        ).frames
-        return (video_pt, seed, MODEL_T2V)
+        if video_input is not None:
+            print(f"Running V2V inference with seed {seed}")
+            pipe_v2v = get_pipeline("v2v")
+            video = load_video(video_input)[:49]  # Limit to 49 frames
+            video_pt = pipe_v2v(
+                video=video,
+                prompt=prompt,
+                num_inference_steps=num_inference_steps,
+                num_videos_per_prompt=1,
+                strength=video_strenght,
+                use_dynamic_cfg=True,
+                output_type="pt",
+                guidance_scale=guidance_scale,
+                generator=torch.Generator(device="cpu").manual_seed(seed),
+            ).frames
+            return (video_pt, seed, MODEL_T2V)
+            
+        elif image_input is not None:
+            print(f"Running I2V inference with seed {seed}")
+            pipe_i2v = get_pipeline("i2v")
+            image_input = Image.fromarray(image_input).resize(size=(720, 480))  # Convert to PIL
+            image = load_image(image_input)
+            video_pt = pipe_i2v(
+                image=image,
+                prompt=prompt,
+                num_inference_steps=num_inference_steps,
+                num_videos_per_prompt=1,
+                use_dynamic_cfg=True,
+                output_type="pt",
+                guidance_scale=guidance_scale,
+                generator=torch.Generator(device="cpu").manual_seed(seed),
+            ).frames
+            return (video_pt, seed, MODEL_I2V)
+            
+        else:
+            print(f"Running T2V inference with seed {seed}")
+            pipe_t2v = get_pipeline("t2v")
+            video_pt = pipe_t2v(
+                prompt=prompt,
+                num_videos_per_prompt=1,
+                num_inference_steps=num_inference_steps,
+                num_frames=49,
+                use_dynamic_cfg=True,
+                output_type="pt",
+                guidance_scale=guidance_scale,
+                generator=torch.Generator(device="cpu").manual_seed(seed),
+            ).frames
+            return (video_pt, seed, MODEL_T2V)
+            
+    except torch.cuda.OutOfMemoryError as e:
+        print(f"\n❌ GPU Out of Memory during inference: {str(e)}")
+        raise
+    except Exception as e:
+        print(f"\n❌ Error during inference: {str(e)}")
+        print(f"Exception type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 def convert_to_gif(video_path):
@@ -544,44 +615,89 @@ with gr.Blocks() as demo:
         rife_status,
         progress=gr.Progress(track_tqdm=True),
     ):
-        latents, seed, model_path = infer(
-            prompt,
-            image_input,
-            video_input,
-            video_strength,
-            num_inference_steps=50,  # NOT Changed
-            guidance_scale=7.0,  # NOT Changed
-            seed=seed_value,
-            progress=progress,
-        )
-        if scale_status:
-            latents = utils.upscale_batch_and_concatenate(get_upscale_model(), latents, device)
-        if rife_status:
-            latents = rife_inference_with_latents(get_frame_interpolation_model(), latents)
+        try:
+            latents, seed, model_path = infer(
+                prompt,
+                image_input,
+                video_input,
+                video_strength,
+                num_inference_steps=50,  # NOT Changed
+                guidance_scale=7.0,  # NOT Changed
+                seed=seed_value,
+                progress=progress,
+            )
+            
+            if scale_status:
+                try:
+                    latents = utils.upscale_batch_and_concatenate(get_upscale_model(), latents, device)
+                except Exception as e:
+                    print(f"⚠️ Upscaling failed: {str(e)}")
+                    cleanup_models()
+                    raise gr.Error(f"Super-Resolution failed: {str(e)}. Models have been unloaded to free memory.")
+                    
+            if rife_status:
+                try:
+                    latents = rife_inference_with_latents(get_frame_interpolation_model(), latents)
+                except Exception as e:
+                    print(f"⚠️ Frame interpolation failed: {str(e)}")
+                    cleanup_models()
+                    raise gr.Error(f"Frame Interpolation failed: {str(e)}. Models have been unloaded to free memory.")
 
-        batch_size = latents.shape[0]
-        batch_video_frames = []
-        for batch_idx in range(batch_size):
-            pt_image = latents[batch_idx]
-            pt_image = torch.stack([pt_image[i] for i in range(pt_image.shape[0])])
+            batch_size = latents.shape[0]
+            batch_video_frames = []
+            for batch_idx in range(batch_size):
+                pt_image = latents[batch_idx]
+                pt_image = torch.stack([pt_image[i] for i in range(pt_image.shape[0])])
 
-            image_np = VaeImageProcessor.pt_to_numpy(pt_image)
-            image_pil = VaeImageProcessor.numpy_to_pil(image_np)
-            batch_video_frames.append(image_pil)
+                image_np = VaeImageProcessor.pt_to_numpy(pt_image)
+                image_pil = VaeImageProcessor.numpy_to_pil(image_np)
+                batch_video_frames.append(image_pil)
 
-        # Calculate correct FPS based on model and frame count
-        num_frames_generated = len(batch_video_frames[0])
-        correct_fps = get_correct_fps(model_path, num_frames_generated)
-        
-        video_path = utils.save_video(
-            batch_video_frames[0], fps=correct_fps
-        )
-        video_update = gr.update(visible=True, value=video_path)
-        gif_path = convert_to_gif(video_path)
-        gif_update = gr.update(visible=True, value=gif_path)
-        seed_update = gr.update(visible=True, value=seed)
+            # Calculate correct FPS based on model and frame count
+            num_frames_generated = len(batch_video_frames[0])
+            correct_fps = get_correct_fps(model_path, num_frames_generated)
+            
+            video_path = utils.save_video(
+                batch_video_frames[0], fps=correct_fps
+            )
+            video_update = gr.update(visible=True, value=video_path)
+            gif_path = convert_to_gif(video_path)
+            gif_update = gr.update(visible=True, value=gif_path)
+            seed_update = gr.update(visible=True, value=seed)
 
-        return video_path, video_update, gif_update, seed_update
+            return video_path, video_update, gif_update, seed_update
+            
+        except torch.cuda.OutOfMemoryError as e:
+            error_msg = f"GPU Out of Memory: {str(e)}"
+            print(f"\n❌ {error_msg}")
+            cleanup_on_error()
+            raise gr.Error(f"{error_msg}\n\nAll auxiliary models have been unloaded to free memory. Please try again with lower resolution or disable Super-Resolution/Frame Interpolation.")
+            
+        except RuntimeError as e:
+            if "CUDA" in str(e) or "out of memory" in str(e).lower():
+                error_msg = f"CUDA Runtime Error: {str(e)}"
+                print(f"\n❌ {error_msg}")
+                cleanup_on_error()
+                raise gr.Error(f"{error_msg}\n\nModels have been unloaded. Please try again or restart the container if the issue persists.")
+            else:
+                error_msg = f"Runtime Error: {str(e)}"
+                print(f"\n❌ {error_msg}")
+                cleanup_on_error()
+                raise gr.Error(error_msg)
+                
+        except Exception as e:
+            error_msg = f"Unexpected error during generation: {str(e)}"
+            print(f"\n❌ {error_msg}")
+            print(f"Exception type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            cleanup_on_error()
+            raise gr.Error(f"{error_msg}\n\nModels have been unloaded. Check container logs for details.")
+            
+        finally:
+            # Always clear CUDA cache after generation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def enhance_prompt_func(prompt):
         return convert_prompt(prompt, retry_times=1)

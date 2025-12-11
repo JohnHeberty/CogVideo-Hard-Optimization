@@ -47,6 +47,16 @@ on the road</code></pre>
 
 ## 🚀 Key Features
 
+### ⚡ Latest Improvements (v2.0)
+
+- **🛡️ Robust Error Handling** - Automatic model cleanup on crashes
+- **💬 Error Reporting** - All errors displayed in Gradio UI with `gr.Error()`
+- **🔄 Memory Recovery** - Models unload on failure (21GB → 700MB)
+- **📊 Detailed Logging** - Full tracebacks for debugging
+- **🎯 CUDA OOM Detection** - Specific handling for out-of-memory errors
+
+See [ERROR_HANDLING.md](ERROR_HANDLING.md) for details.
+
 ### 🎯 Core Optimizations
 - ⚡ **Lazy Loading** - Models load on-demand: **out of memory idle** → 23GB only during generation
 - 🎞️ **FPS Auto-Detection** - Automatically detects 8fps (CogVideoX) or 16fps (CogVideoX1.5)
