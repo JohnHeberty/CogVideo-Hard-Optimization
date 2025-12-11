@@ -615,89 +615,96 @@ with gr.Blocks() as demo:
         rife_status,
         progress=gr.Progress(track_tqdm=True),
     ):
-        try:
-            latents, seed, model_path = infer(
-                prompt,
-                image_input,
-                video_input,
-                video_strength,
-                num_inference_steps=50,  # NOT Changed
-                guidance_scale=7.0,  # NOT Changed
-                seed=seed_value,
-                progress=progress,
-            )
-            
-            if scale_status:
-                try:
-                    latents = utils.upscale_batch_and_concatenate(get_upscale_model(), latents, device)
-                except Exception as e:
-                    print(f"⚠️ Upscaling failed: {str(e)}")
-                    cleanup_models()
-                    raise gr.Error(f"Super-Resolution failed: {str(e)}. Models have been unloaded to free memory.")
-                    
-            if rife_status:
-                try:
-                    latents = rife_inference_with_latents(get_frame_interpolation_model(), latents)
-                except Exception as e:
-                    print(f"⚠️ Frame interpolation failed: {str(e)}")
-                    cleanup_models()
-                    raise gr.Error(f"Frame Interpolation failed: {str(e)}. Models have been unloaded to free memory.")
-
-            batch_size = latents.shape[0]
-            batch_video_frames = []
-            for batch_idx in range(batch_size):
-                pt_image = latents[batch_idx]
-                pt_image = torch.stack([pt_image[i] for i in range(pt_image.shape[0])])
-
-                image_np = VaeImageProcessor.pt_to_numpy(pt_image)
-                image_pil = VaeImageProcessor.numpy_to_pil(image_np)
-                batch_video_frames.append(image_pil)
-
-            # Calculate correct FPS based on model and frame count
-            num_frames_generated = len(batch_video_frames[0])
-            correct_fps = get_correct_fps(model_path, num_frames_generated)
-            
-            video_path = utils.save_video(
-                batch_video_frames[0], fps=correct_fps
-            )
-            video_update = gr.update(visible=True, value=video_path)
-            gif_path = convert_to_gif(video_path)
-            gif_update = gr.update(visible=True, value=gif_path)
-            seed_update = gr.update(visible=True, value=seed)
-
-            return video_path, video_update, gif_update, seed_update
-            
-        except torch.cuda.OutOfMemoryError as e:
-            error_msg = f"GPU Out of Memory: {str(e)}"
-            print(f"\n❌ {error_msg}")
-            cleanup_on_error()
-            raise gr.Error(f"{error_msg}\n\nAll auxiliary models have been unloaded to free memory. Please try again with lower resolution or disable Super-Resolution/Frame Interpolation.")
-            
-        except RuntimeError as e:
-            if "CUDA" in str(e) or "out of memory" in str(e).lower():
-                error_msg = f"CUDA Runtime Error: {str(e)}"
-                print(f"\n❌ {error_msg}")
-                cleanup_on_error()
-                raise gr.Error(f"{error_msg}\n\nModels have been unloaded. Please try again or restart the container if the issue persists.")
-            else:
-                error_msg = f"Runtime Error: {str(e)}"
-                print(f"\n❌ {error_msg}")
-                cleanup_on_error()
-                raise gr.Error(error_msg)
+        # Usa context manager para garantir limpeza de memória ao final
+        with memory_manager.temporary_operation("video_generation"):
+            try:
+                latents, seed, model_path = infer(
+                    prompt,
+                    image_input,
+                    video_input,
+                    video_strength,
+                    num_inference_steps=50,  # NOT Changed
+                    guidance_scale=7.0,  # NOT Changed
+                    seed=seed_value,
+                    progress=progress,
+                )
                 
-        except Exception as e:
-            error_msg = f"Unexpected error during generation: {str(e)}"
-            print(f"\n❌ {error_msg}")
-            print(f"Exception type: {type(e).__name__}")
-            import traceback
-            traceback.print_exc()
-            cleanup_on_error()
-            raise gr.Error(f"{error_msg}\n\nModels have been unloaded. Check container logs for details.")
-            
-        finally:
-            # Always clear CUDA cache after generation
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                # Usa context manager para modelos auxiliares (descarrega automaticamente após uso)
+                if scale_status:
+                    try:
+                        with memory_manager.load_model("upscale") as upscale_model:
+                            latents = utils.upscale_batch_and_concatenate(upscale_model, latents, device)
+                        # Modelo automaticamente descarregado aqui
+                    except Exception as e:
+                        print(f"⚠️ Upscaling failed: {str(e)}")
+                        cleanup_models()
+                        raise gr.Error(f"Super-Resolution failed: {str(e)}. Models have been unloaded to free memory.")
+                        
+                if rife_status:
+                    try:
+                        with memory_manager.load_model("frame_interpolation") as rife_model:
+                            latents = rife_inference_with_latents(rife_model, latents)
+                        # Modelo automaticamente descarregado aqui
+                    except Exception as e:
+                        print(f"⚠️ Frame interpolation failed: {str(e)}")
+                        cleanup_models()
+                        raise gr.Error(f"Frame Interpolation failed: {str(e)}. Models have been unloaded to free memory.")
+
+                batch_size = latents.shape[0]
+                batch_video_frames = []
+                for batch_idx in range(batch_size):
+                    pt_image = latents[batch_idx]
+                    pt_image = torch.stack([pt_image[i] for i in range(pt_image.shape[0])])
+
+                    image_np = VaeImageProcessor.pt_to_numpy(pt_image)
+                    image_pil = VaeImageProcessor.numpy_to_pil(image_np)
+                    batch_video_frames.append(image_pil)
+
+                # Calculate correct FPS based on model and frame count
+                num_frames_generated = len(batch_video_frames[0])
+                correct_fps = get_correct_fps(model_path, num_frames_generated)
+                
+                video_path = utils.save_video(
+                    batch_video_frames[0], fps=correct_fps
+                )
+                video_update = gr.update(visible=True, value=video_path)
+                gif_path = convert_to_gif(video_path)
+                gif_update = gr.update(visible=True, value=gif_path)
+                seed_update = gr.update(visible=True, value=seed)
+
+                return video_path, video_update, gif_update, seed_update
+                
+            except torch.cuda.OutOfMemoryError as e:
+                error_msg = f"GPU Out of Memory: {str(e)}"
+                print(f"\n❌ {error_msg}")
+                cleanup_on_error()
+                raise gr.Error(f"{error_msg}\n\nAll auxiliary models have been unloaded to free memory. Please try again with lower resolution or disable Super-Resolution/Frame Interpolation.")
+                
+            except RuntimeError as e:
+                if "CUDA" in str(e) or "out of memory" in str(e).lower():
+                    error_msg = f"CUDA Runtime Error: {str(e)}"
+                    print(f"\n❌ {error_msg}")
+                    cleanup_on_error()
+                    raise gr.Error(f"{error_msg}\n\nModels have been unloaded. Please try again or restart the container if the issue persists.")
+                else:
+                    error_msg = f"Runtime Error: {str(e)}"
+                    print(f"\n❌ {error_msg}")
+                    cleanup_on_error()
+                    raise gr.Error(error_msg)
+                    
+            except Exception as e:
+                error_msg = f"Unexpected error during generation: {str(e)}"
+                print(f"\n❌ {error_msg}")
+                print(f"Exception type: {type(e).__name__}")
+                import traceback
+                traceback.print_exc()
+                cleanup_on_error()
+                raise gr.Error(f"{error_msg}\n\nModels have been unloaded. Check container logs for details.")
+                
+            finally:
+                # Always clear CUDA cache after generation
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
     def enhance_prompt_func(prompt):
         return convert_prompt(prompt, retry_times=1)
